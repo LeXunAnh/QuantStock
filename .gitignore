@@ -1,0 +1,32 @@
+# Virtual Environment
+.venv
+venv
+
+# Environment variables
+.env
+
+# Python cache
+__pycache__
+.pyc
+.pyo
+.pyd
+
+# Distribution
+dist
+build
+.egg-info
+
+# IDE
+.idea
+.vscode
+
+# Logs
+.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+#Others
+docs
+test_api_ssi
