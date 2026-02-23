@@ -68,6 +68,17 @@ class DatabaseHandler:
             logger.error(f"❌ Lỗi khi lấy danh sách symbol: {e}")
             return []
 
+    def get_latest_trading_date(self, table_name, symbol):
+        """Lấy ngày giao dịch gần nhất của 1 mã trong bảng được chỉ định"""
+        query = text(f"SELECT MAX(trading_date) FROM {table_name} WHERE symbol = :symbol")
+        try:
+            with self.engine.connect() as conn:
+                result = conn.execute(query, {"symbol": symbol}).scalar()
+                return result  # Trả về đối tượng date hoặc None
+        except Exception as e:
+            logger.error(f"Lỗi khi lấy max date của {symbol}: {e}")
+            return None
+
 if __name__ == "__main__":
     db_manager = DatabaseHandler()
     #print(db_manager.get_all_symbols())

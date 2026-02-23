@@ -1,8 +1,11 @@
 from ssi_fc_data import fc_md_client, model
 from src import config
+from tqdm import tqdm
+from datetime import datetime, timedelta
 import pandas as pd
-import logging
+import logging,time
 from DatabaseHandler import DatabaseHandler
+
 logger = logging.getLogger(__name__)
 
 class ssi_api:
@@ -78,6 +81,62 @@ class ssi_api:
             self.get_access_token()
         else:
             logger.error(f"Lỗi lấy OHLC cho {symbol}: {res}")
+
+    def sync_all_ohlc(self, market='HOSE', from_date='01/01/2015', to_date='13/02/2026'):
+        # 1. Lấy danh sách mã từ DB
+        symbols = self.db.get_all_symbols(market=market)
+        # 2. Khởi tạo tqdm bao quanh danh sách vòng lặp
+        # desc: Mô tả hiện trên thanh progress
+        # unit: Đơn vị (ở đây là từng mã 'symbol')
+        pbar = tqdm(symbols, desc=f"🚀 Syncing {market}", unit="symbol")
+
+        for symbol in pbar:
+            try:
+                # Cập nhật nội dung hiển thị trên thanh progress (tùy chọn)
+                pbar.set_postfix({"Current": symbol})
+                # Gọi hàm fetch dữ liệu
+                self.fetch_daily_ohlc(symbol, from_date, to_date)
+                # Kiểm soát Rate Limit
+                time.sleep(0.3)
+
+            except Exception as e:
+                logger.error(f"Lỗi tại mã {symbol}: {e}")
+                continue
+
+    def maintenance_sync(self, market='HOSE'):
+        """Hàm cập nhật dữ liệu hàng ngày cho tất cả các mã"""
+        symbols = self.db.get_all_symbols(market=market)
+        today_str = datetime.now().strftime('%d/%m/%Y')
+
+        pbar = tqdm(symbols, desc=f"🔄 Daily Update {market}")
+
+        for symbol in pbar:
+            # 1. Kiểm tra ngày cuối cùng trong bảng daily_ohlc
+            last_date_ohlc = self.db.get_latest_trading_date('daily_ohlc', symbol)
+
+            # Xác định from_date cho OHLC
+            if last_date_ohlc:
+                # Lấy từ ngày tiếp theo của ngày cuối cùng trong DB
+                from_date_ohlc = (last_date_ohlc + timedelta(days=1)).strftime('%d/%m/%Y')
+            else:
+                from_date_ohlc = "01/01/2015"  # Nếu mới tinh thì lấy từ 2015
+
+            # 2. Gọi API cập nhật nếu cần (chỉ gọi nếu from_date <= today)
+            if last_date_ohlc != datetime.now().date():
+                self.fetch_daily_ohlc(symbol, from_date_ohlc, today_str)
+
+            # 3. Tương tự cho daily_stock_prices (từ 2021)
+            last_date_prices = self.db.get_latest_trading_date('daily_stock_prices', symbol)
+            if last_date_prices:
+                from_date_prices = (last_date_prices + timedelta(days=1)).strftime('%d/%m/%Y')
+            else:
+                from_date_prices = "01/01/2021"
+
+            if last_date_prices != datetime.now().date():
+                # Hàm này chúng ta sẽ viết chi tiết ở bước sau
+                self.fetch_daily_stock_prices(symbol, from_date_prices, today_str)
+
+            time.sleep(0.3)  # Giữ cho API không bị nghẽn
 
     def fetch_daily_stock_prices(self, symbol, from_date, to_date):
         """Lấy dữ liệu giá chi tiết từ 2021 (Mục 4.9 tài liệu)"""
@@ -214,4 +273,5 @@ if __name__ == "__main__":
     api = ssi_api(config)
     #api.fetch_and_sync_securities()
     #api.sync_all_markets()
-    api.fetch_daily_ohlc("SSI","01/01/2015","01/01/2026")
+    #api.fetch_daily_ohlc("SSI","01/01/2015","01/01/2026")
+    #api.sync_all_ohlc()
