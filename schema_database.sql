@@ -77,7 +77,9 @@ CREATE INDEX idx_ohlc_symbol_date ON daily_ohlc (symbol, trading_date DESC);
 --query test
 select * from securities order by symbol 
 select * from daily_ohlc where symbol = 'SSI' order by trading_date DESC ;
-select * from daily_stock_prices
+select * from daily_stock_prices where symbol = 'VNM' order by trading_date DESC ;
+
+select count(*)from securities where length(symbol) = 3 and market = 'HOSE'; 
 
 DROP TABLE IF EXISTS securities;
 DROP TABLE IF EXISTS daily_ohlc;
