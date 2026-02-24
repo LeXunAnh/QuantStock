@@ -68,6 +68,27 @@ class DatabaseHandler:
             logger.error(f"❌ Lỗi khi lấy danh sách symbol: {e}")
             return []
 
+    def get_all_symbols_except_CQ(self, market=None, only_companies=True):
+        """
+        Lấy danh sách mã chứng khoán.
+        :param only_companies: Nếu True, chỉ lấy mã 3 ký tự (Cổ phiếu/ETF).
+                               Nếu False, lấy tất cả (bao gồm Chứng quyền ~6-8 ký tự).
+        """
+        query = "SELECT symbol FROM securities WHERE 1=1"
+        params = {}
+        if only_companies:
+            query += " AND symbol ~ '^[A-Z0-9]{3}$'"  # Lấy 3 ký tự (chữ hoặc số như ETF)
+        if market:
+            query += " AND market = :market"
+
+        try:
+            with self.engine.connect() as conn:
+                result = conn.execute(text(query), params)
+                return [row[0] for row in result]
+        except Exception as e:
+            logger.error(f"Lỗi khi lấy danh sách mã công ty: {e}")
+            raise
+
     def get_latest_trading_date(self, table_name, symbol):
         """Lấy ngày giao dịch gần nhất của 1 mã trong bảng được chỉ định"""
         query = text(f"SELECT MAX(trading_date) FROM {table_name} WHERE symbol = :symbol")
@@ -82,4 +103,5 @@ class DatabaseHandler:
 if __name__ == "__main__":
     db_manager = DatabaseHandler()
     #print(db_manager.get_all_symbols())
+    #print(db_manager.get_all_symbols_except_CQ())
 
