@@ -1,4 +1,5 @@
 from sqlalchemy import create_engine,text
+from datetime import datetime, timedelta
 import pandas as pd
 from src import config
 import logging
@@ -80,7 +81,7 @@ class DatabaseHandler:
             query += " AND symbol ~ '^[A-Z0-9]{3}$'"  # Lấy 3 ký tự (chữ hoặc số như ETF)
         if market:
             query += " AND market = :market"
-
+            params["market"] = market
         try:
             with self.engine.connect() as conn:
                 result = conn.execute(text(query), params)
@@ -100,8 +101,51 @@ class DatabaseHandler:
             logger.error(f"Lỗi khi lấy max date của {symbol}: {e}")
             return None
 
+    def optimize_db(self):
+        with self.engine.connect() as conn:
+            conn.execute(text("COMMIT"))  # Cần thoát khỏi transaction
+            conn.execute(text("ANALYZE daily_ohlc"))
+            conn.execute(text("ANALYZE daily_stock_prices"))
+            logger.info("🚀 DB Optimized: Statistics updated for query planner.")
+
+    def get_data_gaps(self, symbol):
+        query = text("""
+            WITH date_series AS (
+                SELECT trading_date,
+                       LEAD(trading_date) OVER (ORDER BY trading_date) as next_date
+                FROM daily_stock_prices
+                WHERE symbol = :symbol
+            ),
+            gaps AS (
+                SELECT trading_date, next_date
+                FROM date_series
+                WHERE next_date - trading_date > 1
+                AND next_date IS NOT NULL
+            )
+            SELECT g.trading_date + INTERVAL '1 day' as gap_start,
+                   g.next_date - INTERVAL '1 day'    as gap_end
+            FROM gaps g
+            WHERE EXISTS (
+                SELECT 1 FROM trading_calendar tc
+                WHERE tc.trading_date > g.trading_date
+                  AND tc.trading_date < g.next_date
+                  AND tc.is_trading_day = TRUE
+            )
+            ORDER BY gap_start;
+        """)
+
+        try:
+            with self.engine.connect() as conn:
+                result = conn.execute(query, {"symbol": symbol})
+                return [(row[0], row[1]) for row in result]
+        except Exception as e:
+            logger.error(f"❌ Lỗi khi tìm gap cho {symbol}: {e}")
+            return []
+
+
 if __name__ == "__main__":
     db_manager = DatabaseHandler()
     #print(db_manager.get_all_symbols())
     #print(db_manager.get_all_symbols_except_CQ())
-
+    #db_manager.optimize_db()
+    #db_manager.get_data_gaps()
