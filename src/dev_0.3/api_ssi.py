@@ -58,33 +58,38 @@ class ssi_api:
 
     def fetch_daily_ohlc(self, symbol, from_date, to_date):
         """Lấy dữ liệu OHLC từ năm 2015 (Mục 4.6 tài liệu)"""
-        req = model.daily_ohlc(symbol, from_date, to_date, 1, 9999,True)
-        res = self.client.daily_ohlc(self.config,req)
-        status = res.get('status')
+        for attempt in range(3):
+            req = model.daily_ohlc(symbol, from_date, to_date, 1, 9999,True)
+            res = self.client.daily_ohlc(self.config,req)
+            status = res.get('status')
 
-        if status == 'Success':
-            df = pd.DataFrame(res.get('data', []))
-            if df.empty: return
+            if status == 'Success':
+                df = pd.DataFrame(res.get('data', []))
+                if df.empty: return
 
-            # Transform dữ liệu
-            df_ohlc = pd.DataFrame({
-                'symbol': symbol,
-                'trading_date': pd.to_datetime(df['TradingDate'], dayfirst=True).dt.date,
-                'open_price': pd.to_numeric(df['Open']),
-                'highest_price': pd.to_numeric(df['High']),
-                'lowest_price': pd.to_numeric(df['Low']),
-                'close_price': pd.to_numeric(df['Close']),
-                'volume': pd.to_numeric(df['Volume']).astype(int),
-                'total_value': pd.to_numeric(df['Value'])
-            })
+                # Transform dữ liệu
+                df_ohlc = pd.DataFrame({
+                    'symbol': symbol,
+                    'trading_date': pd.to_datetime(df['TradingDate'], dayfirst=True).dt.date,
+                    'open_price': pd.to_numeric(df['Open']),
+                    'highest_price': pd.to_numeric(df['High']),
+                    'lowest_price': pd.to_numeric(df['Low']),
+                    'close_price': pd.to_numeric(df['Close']),
+                    'volume': pd.to_numeric(df['Volume']).astype(int),
+                    'total_value': pd.to_numeric(df['Value'])
+                })
 
-            self.db.save_data(df_ohlc, 'daily_ohlc', ['symbol', 'trading_date'])
+                self.db.save_data(df_ohlc, 'daily_ohlc', ['symbol', 'trading_date'])
 
-        elif status == 401 or res.get('statusCode') == 401:  # ✅
-            logger.error("Lỗi xác thực: Access Token hết hạn hoặc sai.")
-            self.get_access_token()
-        else:
-            logger.error(f"Lỗi lấy OHLC cho {symbol}: status={status}, message={res.get('message')}")
+            elif status == 401 or res.get('statusCode') == 401:  # ✅
+                logger.error("Lỗi xác thực: Access Token hết hạn hoặc sai.")
+                self.get_access_token()
+            elif status == 429 or res.get('statusCode') == 429:
+                wait_time = (attempt + 1) * 2  # Đợi tăng dần: 2s, 4s, 6s
+                logger.warning(f"⏳ Rate limit OHLC cho {symbol}, đợi {wait_time}s (Lần {attempt + 1})")
+                time.sleep(wait_time)
+            else:
+                logger.error(f"Lỗi lấy OHLC cho {symbol}: status={status}, message={res.get('message')}")
 
     def sync_all_ohlc(self, market='HOSE', from_date='01/01/2015', to_date='13/02/2026'):
         # 1. Lấy danh sách mã từ DB
@@ -120,7 +125,7 @@ class ssi_api:
             pbar_chunks.set_postfix({"range": f"{str_start}-{str_end}"})
 
             success = False
-            for attempt in range(1):
+            for attempt in range(3):
                 if self._execute_fetch_stock_prices(symbol, str_start, str_end):
                     success = True
                     break
@@ -233,6 +238,25 @@ class ssi_api:
                 time.sleep(0.3)
 
     def maintenance_sync(self, market='HOSE'):
+        print("\nChọn chế độ cập nhật:")
+        print("  1. OHLC (daily_ohlc)")
+        print("  2. Price (daily_stock_prices)")
+        print("  3. Exit)")
+
+        while True:
+            choice = input("Nhập lựa chọn (1/2/3): ").strip()
+            if choice == '1':
+                mode = 'ohlc'
+                break
+            elif choice == '2':
+                mode = 'price'
+                break
+            elif choice == '3':
+                logger.info("Out maintenance")
+                return
+            else:
+                print("Vui lòng nhập 1 2 hoặc 3")
+
         symbols = self.db.get_all_symbols_except_CQ(market=market, only_companies=True)
         now = datetime.now()
         market_close = now.replace(hour=16, minute=0, second=0, microsecond=0)
@@ -250,13 +274,21 @@ class ssi_api:
         for symbol in pbar_total:
             try:
                 pbar_total.set_postfix({"current": symbol})
+                if mode == 'ohlc':
+                    last_ohlc = self.db.get_latest_trading_date('daily_ohlc', symbol)
+                    start_ohlc = (last_ohlc + timedelta(days=1)) if last_ohlc \
+                        else datetime.strptime("01/01/2015", '%d/%m/%Y').date()
 
-                last_price = self.db.get_latest_trading_date('daily_stock_prices', symbol)
-                start_price = (last_price + timedelta(days=1)) if last_price \
-                    else datetime.strptime("01/01/2021", '%d/%m/%Y').date()
+                    if start_ohlc <= to_date:
+                        self.fetch_daily_ohlc(symbol, start_ohlc.strftime('%d/%m/%Y'), to_date_str)
 
-                if start_price <= to_date:
-                    self.fetch_daily_stock_prices(symbol, start_price.strftime('%d/%m/%Y'), to_date_str)
+                elif mode == 'price':
+                    last_price = self.db.get_latest_trading_date('daily_stock_prices', symbol)
+                    start_price = (last_price + timedelta(days=1)) if last_price \
+                        else datetime.strptime("01/01/2021", '%d/%m/%Y').date()
+
+                    if start_price <= to_date:
+                        self.fetch_daily_stock_prices(symbol, start_price.strftime('%d/%m/%Y'), to_date_str)
 
             except Exception as e:
                 logger.error(f"Lỗi bảo trì tại mã {symbol}: {e}")
@@ -300,10 +332,10 @@ if __name__ == "__main__":
     #api.fetch_and_sync_securities()
     #api.sync_all_markets()
 
-    #api.fetch_daily_ohlc("SSI","01/01/2015","01/01/2026")
+    #api.fetch_daily_ohlc("SSI","01/01/2015","26/03/2026")
     #api.sync_all_ohlc()
 
-    #api.fetch_daily_stock_prices("ANV","01/01/2021","27/02/2026")
+    #api.fetch_daily_stock_prices("SSI","01/01/2021","26/03/2026")
     #api.sync_all_stock_prices(market='HOSE', from_date='01/01/2021')
-    #api.maintenance_sync(market='HOSE')
+    api.maintenance_sync(market='HOSE')
     #api.repair_all_gaps(market='HOSE')

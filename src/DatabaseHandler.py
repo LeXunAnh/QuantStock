@@ -1,4 +1,5 @@
 from sqlalchemy import create_engine,text
+from sqlalchemy.pool import QueuePool
 from datetime import datetime, timedelta
 import pandas as pd
 from src import config
@@ -11,7 +12,15 @@ class DatabaseHandler:
         self.db_uri = config.DB_URI
         if not self.db_uri:
             raise ValueError("Not found DB_URI trong file config")
-        self.engine = create_engine(self.db_uri)
+        self.engine = create_engine(
+            self.db_uri,
+            poolclass=QueuePool,
+            pool_size=5,  # Số connection thường trực
+            max_overflow=10,  # Cho phép mở thêm khi burst
+            pool_timeout=30,  # Timeout chờ connection (giây)
+            pool_recycle=1800,  # Recycle connection sau 30 phút (tránh stale)
+            pool_pre_ping=True  # Ping trước khi dùng, tránh "connection closed" error
+        )
 
     def save_data(self, df: pd.DataFrame, table_name: str, conflict_columns: list):
         if df.empty:
@@ -102,11 +111,11 @@ class DatabaseHandler:
             return None
 
     def optimize_db(self):
-        with self.engine.connect() as conn:
-            conn.execute(text("COMMIT"))  # Cần thoát khỏi transaction
+        # Dùng AUTOCOMMIT để ANALYZE chạy ngoài transaction block
+        with self.engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
             conn.execute(text("ANALYZE daily_ohlc"))
             conn.execute(text("ANALYZE daily_stock_prices"))
-            logger.info("🚀 DB Optimized: Statistics updated for query planner.")
+        logger.info("🚀 DB Optimized: Statistics updated for query planner.")
 
     def get_data_gaps(self, symbol):
         query = text("""
@@ -144,6 +153,7 @@ class DatabaseHandler:
 
 
 if __name__ == "__main__":
+    #test
     db_manager = DatabaseHandler()
     #print(db_manager.get_all_symbols())
     #print(db_manager.get_all_symbols_except_CQ())
