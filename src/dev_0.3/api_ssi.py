@@ -332,10 +332,10 @@ if __name__ == "__main__":
     #api.fetch_and_sync_securities()
     #api.sync_all_markets()
 
-    #api.fetch_daily_ohlc("SSI","01/01/2015","26/03/2026")
+    #api.fetch_daily_ohlc("AAV","01/01/2015","27/03/2026")
     #api.sync_all_ohlc()
 
-    #api.fetch_daily_stock_prices("SSI","01/01/2021","26/03/2026")
+    api.fetch_daily_stock_prices("AAV","01/01/2021","26/03/2026")
     #api.sync_all_stock_prices(market='HOSE', from_date='01/01/2021')
-    api.maintenance_sync(market='HOSE')
+    #api.maintenance_sync(market='HOSE')
     #api.repair_all_gaps(market='HOSE')
