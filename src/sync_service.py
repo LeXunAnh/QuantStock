@@ -46,8 +46,7 @@ class SyncService:
             logger.info(f"🔄 Đang đồng bộ danh mục sàn: {market}")
             self.sync_securities(market)
 
-    def fetch_daily_ohlc(self, symbol: str, from_date: str, to_date: str,
-                         max_retries: int = 3) -> bool:
+    def fetch_daily_ohlc(self, symbol: str, from_date: str, to_date: str,max_retries: int = 3) -> bool:
         """Lấy OHLC cho một symbol và lưu vào DB"""
         for attempt in range(max_retries):
             try:
@@ -194,3 +193,13 @@ class SyncService:
                 logger.error(f"Lỗi bảo trì tại mã {symbol}: {e}")
             finally:
                 time.sleep(0.3)
+
+    def sync_one_ohlc(self, symbol: str, from_date: str, to_date: str):
+        """Đồng bộ OHLC cho một mã cụ thể"""
+        logger.info(f"Bắt đầu đồng bộ OHLC cho {symbol} từ {from_date} đến {to_date}")
+        return self.fetch_daily_ohlc(symbol, from_date, to_date)
+
+    def sync_one_stock_price(self, symbol: str, from_date: str, to_date: str):
+        """Đồng bộ dữ liệu giá chi tiết cho một mã cụ thể"""
+        logger.info(f"Bắt đầu đồng bộ giá chi tiết cho {symbol} từ {from_date} đến {to_date}")
+        return self.fetch_daily_stock_prices(symbol, from_date, to_date)

@@ -19,7 +19,7 @@ SELECT
     MIN(trading_date) as start_date, 
     MAX(trading_date) as end_date
 FROM daily_stock_prices
-WHERE symbol = 'ANV'
+WHERE symbol = 'SSI'
 GROUP BY symbol 
 ORDER BY total_records ASC;
 
@@ -98,3 +98,14 @@ JOIN trading_calendar tc
 GROUP BY g.trading_date, g.next_date
 HAVING COUNT(tc.trading_date) > 0
 ORDER BY g.trading_date;
+
+---------------------------------------------------
+SELECT symbol, stock_name, market
+FROM securities
+WHERE symbol IN (
+    SELECT symbol FROM securities
+    EXCEPT
+    (
+        SELECT symbol FROM daily_stock_prices
+    )
+);

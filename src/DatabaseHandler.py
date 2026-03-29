@@ -2,7 +2,7 @@ from sqlalchemy import create_engine,text
 from sqlalchemy.pool import QueuePool
 from datetime import datetime, timedelta
 import pandas as pd
-from src import config
+import config
 import logging
 
 logger = logging.getLogger(__name__)
@@ -59,6 +59,7 @@ class DatabaseHandler:
             logger.info(f"✅ Finished {table_name}: Processed {len(df)} rows. Affected (Upserted): {total_rows_affected} rows.")
         except Exception as e:
             logger.exception(f"❌ SQL error while saving to {table_name}: {e}")
+            raise
 
     def get_all_symbols(self, market=None):
         """Lấy danh sách symbol từ bảng securities"""
