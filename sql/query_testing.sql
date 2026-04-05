@@ -1,7 +1,7 @@
 --query test
 select * from securities order by symbol 
 select * from daily_ohlc where symbol = 'SSI' order by trading_date DESC ;
-select * from daily_stock_prices where symbol = 'EIB' order by trading_date DESC ;
+select * from daily_stock_prices where symbol = 'SSI' order by trading_date DESC ;
 select * from daily_stock_prices where symbol = 'SVD' and trading_date = '2025-06-12';
 
 select count(*)from securities where length(symbol) = 3 and market = 'HOSE'; 
@@ -11,7 +11,7 @@ SELECT
     MIN(trading_date) AS start_date,
     MAX(trading_date) AS end_date
 FROM daily_ohlc
-WHERE symbol = 'SSI';
+WHERE symbol = 'TNI';
 
 SELECT 
     symbol, 
