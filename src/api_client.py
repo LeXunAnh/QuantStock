@@ -14,14 +14,12 @@ class SSIAPIClient:
         req = model.securities(market, page, page_size)
         return self.client.securities(self.config, req)
 
-    def get_daily_ohlc(self, symbol: str, from_date: str, to_date: str,
-                       page: int = 1, page_size: int = 9999) -> dict:
+    def get_daily_ohlc(self, symbol: str, from_date: str, to_date: str, page: int = 1, page_size: int = 9999) -> dict:
         """Lấy dữ liệu OHLC"""
         req = model.daily_ohlc(symbol, from_date, to_date, page, page_size, True)
         return self.client.daily_ohlc(self.config, req)
 
-    def get_daily_stock_price(self, symbol: str, from_date: str, to_date: str,
-                              page: int = 1, page_size: int = 1000) -> dict:
+    def get_daily_stock_price(self, symbol: str, from_date: str, to_date: str, page: int = 1, page_size: int = 1000) -> dict:
         """Lấy dữ liệu giá chi tiết"""
         req = model.daily_stock_price(symbol, from_date, to_date, page, page_size)
         return self.client.daily_stock_price(self.config, req)

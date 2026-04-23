@@ -10,8 +10,7 @@ logger = logging.getLogger(__name__)
 
 class SyncService:
     """Điều phối quá trình đồng bộ dữ liệu"""
-    def __init__(self, api_client: SSIAPIClient, db_handler: DatabaseHandler,
-                 transformer: DataTransformer = None):
+    def __init__(self, api_client: SSIAPIClient, db_handler: DatabaseHandler,transformer: DataTransformer = None):
         self.api = api_client
         self.db = db_handler
         self.transformer = transformer or DataTransformer()
@@ -73,9 +72,7 @@ class SyncService:
                 time.sleep(1)
         return False
 
-    def sync_all_ohlc(self, market: str = 'HOSE',
-                      from_date: str = '01/01/2015',
-                      to_date: str = '13/02/2026'):
+    def sync_all_ohlc(self, market: str = 'HOSE',from_date: str = '01/01/2015',to_date: str = '13/02/2026'):
         """Đồng bộ OHLC cho toàn bộ sàn"""
         symbols = self.db.get_all_symbols(market=market)
         pbar = tqdm(symbols, desc=f"🚀 Syncing {market}", unit="symbol")
@@ -88,8 +85,7 @@ class SyncService:
             finally:
                 time.sleep(1.2)
 
-    def fetch_daily_stock_prices(self, symbol: str, from_date: str, to_date: str,
-                                 chunk_days: int = 30, max_retries: int = 3) -> bool:
+    def fetch_daily_stock_prices(self, symbol: str, from_date: str, to_date: str,chunk_days: int = 30, max_retries: int = 3) -> bool:
         """Lấy dữ liệu giá chi tiết theo từng chunk để tránh rate limit"""
         start_dt = datetime.strptime(from_date, '%d/%m/%Y')
         end_dt = datetime.strptime(to_date, '%d/%m/%Y')
