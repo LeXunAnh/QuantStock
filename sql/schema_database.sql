@@ -253,4 +253,5 @@ CREATE INDEX IF NOT EXISTS idx_signals_active
     ON trading_signals (is_active, signal_date DESC)
     WHERE is_active = TRUE;
 
+ADD CONSTRAINT uq_trading_signals_symbol_date_type UNIQUE (symbol, signal_date, signal_type);
 ----------------------------------------------------------------------------------------------

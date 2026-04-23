@@ -1,0 +1,329 @@
+from __future__ import annotations
+
+import logging
+from datetime import datetime, timedelta
+from typing import Optional
+
+from indicators import ma,atr,bollinger,foreign_flow,macd,rsi,stochastic,volume
+
+import pandas as pd
+from sqlalchemy import text
+from tqdm import tqdm
+
+from DatabaseHandler import DatabaseHandler
+
+logger = logging.getLogger(__name__)
+
+class IndicatorService:
+    """
+    Điều phối tính toán & lưu trữ chỉ báo kỹ thuật.
+
+    Cách dùng nhanh:
+        svc = IndicatorService(db)
+        svc.run_one("SSI")
+        svc.run_all("HOSE")
+        svc.run_maintenance("HOSE")   # chỉ tính ngày chưa có
+    """
+
+    # Cần ít nhất bao nhiêu nến để kết quả có ý nghĩa (MA200)
+    MIN_HISTORY_DAYS = 210
+
+    # Cột DB output tương ứng với cột pandas
+    _OUTPUT_COLS = [
+        "symbol", "trading_date",
+        # Trend
+        "ma5", "ma10", "ma20", "ma50", "ma200",
+        "ema9", "ema12", "ema26",
+        # Momentum
+        "rsi14",
+        "macd", "macd_signal", "macd_hist",
+        "stoch_k", "stoch_d",
+        # Volatility
+        "bb_upper", "bb_middle", "bb_lower", "bb_width", "atr14",
+        # Volume
+        "vol_ma20", "vol_ratio", "obv",
+        # Foreign flow
+        "net_foreign_vol_5d", "net_foreign_vol_10d",
+        "net_foreign_val_5d", "net_foreign_val_10d",
+    ]
+
+    def __init__(self, db_handler: DatabaseHandler):
+        self.db = db_handler
+
+    @staticmethod
+    def _adjust_prices(df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Áp hệ số điều chỉnh (adj_factor) lên toàn bộ OHLC trước khi
+        tính bất kỳ indicator nào.
+
+        adj_factor = close_price_adjusted / close_price
+
+        Kết quả: các cột close_price, open_price, highest_price, lowest_price
+        được THAY THẾ bằng giá đã điều chỉnh — engine phía dưới chỉ thấy
+        giá sạch, không cần biết sự tồn tại của adj_factor.
+
+        Volume và foreign flow KHÔNG điều chỉnh (đơn vị cổ phiếu, không
+        bị ảnh hưởng bởi chia cổ tức tiền mặt / tách cổ phiếu).
+        """
+        valid = (df["close_price"] > 0) & df["close_price_adjusted"].notna()
+        df = df[valid].copy()
+
+        adj_factor = (df["close_price_adjusted"] / df["close_price"]).fillna(1.0)
+
+        df["close_price"] = (df["close_price_adjusted"]).round(2)
+        df["open_price"] = (df["open_price"] * adj_factor).round(2)
+        df["highest_price"] = (df["highest_price"] * adj_factor).round(2)
+        df["lowest_price"] = (df["lowest_price"] * adj_factor).round(2)
+
+        return df.reset_index(drop=True)
+
+    # ─── DB helpers ─────────────────────────────────────────────
+    def _fetch_prices(self, symbol: str, from_date: Optional[str] = None) -> pd.DataFrame:
+        """
+        Lấy giá từ daily_stock_prices cho một mã.
+        Luôn lấy thêm MIN_HISTORY_DAYS trước from_date để đảm bảo
+        MA200 có đủ lookback khi chỉ muốn tính từ một ngày cụ thể.
+        """
+        params: dict = {"symbol": symbol}
+        date_clause = ""
+
+        if from_date:
+            # Lùi thêm MIN_HISTORY_DAYS để warmup các chỉ báo dài hạn
+            warmup = (
+                datetime.strptime(from_date, "%Y-%m-%d")
+                - timedelta(days=self.MIN_HISTORY_DAYS + 30)
+            ).strftime("%Y-%m-%d")
+            date_clause = "AND trading_date >= :warmup"
+            params["warmup"] = warmup
+
+        query = text(f"""
+            SELECT
+                trading_date,
+                open_price,
+                highest_price,
+                lowest_price,
+                close_price,
+                close_price_adjusted,
+                total_traded_vol,
+                net_buy_sell_vol,
+                net_buy_sell_val
+            FROM daily_stock_prices
+            WHERE symbol = :symbol
+              {date_clause}
+            ORDER BY trading_date ASC
+        """)
+
+        try:
+            with self.db.engine.connect() as conn:
+                df = pd.read_sql(query, conn, params=params)
+            return df
+        except Exception as e:
+            logger.error(f"❌ Lỗi fetch giá {symbol}: {e}")
+            return pd.DataFrame()
+
+    def _get_latest_indicator_date(self, symbol: str):
+        """Ngày gần nhất đã có indicator trong DB (hoặc None)"""
+        query = text(
+            "SELECT MAX(trading_date) FROM technical_indicators WHERE symbol = :sym"
+        )
+        try:
+            with self.db.engine.connect() as conn:
+                return conn.execute(query, {"sym": symbol}).scalar()
+        except Exception as e:
+            logger.error(f"Lỗi lấy max indicator date {symbol}: {e}")
+            return None
+
+    def _save(self, df: pd.DataFrame):
+        """Upsert vào technical_indicators"""
+        if df.empty:
+            return
+        # Chỉ lấy các cột đã khai báo, bỏ NaN-all rows
+        out = df[self._OUTPUT_COLS].dropna(subset=["ma5"])  # ít nhất MA5 phải có
+        if out.empty:
+            return
+        self.db.save_data(out, "technical_indicators", ["symbol", "trading_date"])
+
+    # ─── Compute pipeline ───────────────────────────────────────
+
+    def _compute(self, symbol: str, raw: pd.DataFrame, from_date: Optional[str] = None) -> pd.DataFrame:
+        """Pipeline tính toán tuần tự tất cả indicators"""
+        raw["symbol"] = symbol
+        # 1. Điều chỉnh giá
+        df = self._adjust_prices(raw)
+
+        # 2. Gọi từng module chỉ báo
+        df = ma.calc_ma_family(df)
+        df = rsi.calc_rsi(df)
+        df = macd.calc_macd(df)
+        df = stochastic.calc_stochastic(df)
+        df = bollinger.calc_bollinger(df)
+        df = atr.calc_atr(df)
+        df = volume.calc_volume_indicators(df)
+        df = foreign_flow.calc_volume_indicators(df)
+
+        # Lọc từ from_date
+        if from_date:
+            df = df[df["trading_date"] >= pd.Timestamp(from_date)]
+        return df
+
+    # ─── Public API ─────────────────────────────────────────────
+
+    def run_one(self, symbol: str, from_date: Optional[str] = None) -> bool:
+        """
+        Tính và lưu indicators cho MỘT mã.
+
+        Args:
+            symbol   : Mã chứng khoán, ví dụ 'SSI'
+            from_date: 'YYYY-MM-DD' — chỉ lưu từ ngày này trở đi.
+                       None → tính toàn bộ lịch sử.
+        """
+        raw = self._fetch_prices(symbol, from_date)
+        if raw.empty:
+            logger.warning(f"⚠️  {symbol}: Không có dữ liệu giá")
+            return False
+
+        result = self._compute(symbol, raw, from_date)
+        if result.empty:
+            return False
+
+        self._save(result)
+        logger.info(f"✅ {symbol}: Đã tính {len(result)} rows indicators")
+        return True
+
+    def run_all(self, market: str = "HOSE", from_date: Optional[str] = None):
+        """
+        Tính và lưu indicators cho TOÀN BỘ mã trên sàn.
+
+        Args:
+            market   : 'HOSE' | 'HNX' | 'UPCOM'
+            from_date: 'YYYY-MM-DD' — nếu None thì tính toàn bộ lịch sử.
+        """
+        symbols = self.db.get_all_symbols_except_CQ(market=market, only_companies=True)
+        logger.info(f"🚀 Bắt đầu tính indicators: {len(symbols)} mã | sàn {market}")
+
+        ok = fail = 0
+        pbar = tqdm(symbols, desc=f"Indicators {market}", unit="sym")
+        for sym in pbar:
+            pbar.set_postfix({"current": sym})
+            try:
+                if self.run_one(sym, from_date):
+                    ok += 1
+                else:
+                    fail += 1
+            except Exception as e:
+                logger.error(f"❌ {sym}: {e}")
+                fail += 1
+
+        logger.info(f"✅ Hoàn tất: {ok} thành công / {fail} thất bại")
+
+    def run_maintenance(self, market: str = "HOSE"):
+        """
+        Chế độ BẢO TRÌ: chỉ tính các ngày chưa có indicators.
+        Tự động lấy ngày gần nhất trong DB làm from_date cho từng mã.
+        """
+        symbols = self.db.get_all_symbols_except_CQ(market=market, only_companies=True)
+        logger.info(f"🔄 Bảo trì indicators: {len(symbols)} mã | sàn {market}")
+
+        today = datetime.now().date()
+        ok = skip = fail = 0
+        pbar = tqdm(symbols, desc=f"Maintenance {market}", unit="sym")
+
+        for sym in pbar:
+            pbar.set_postfix({"current": sym})
+            try:
+                last = self._get_latest_indicator_date(sym)
+                if last and last >= today:
+                    skip += 1
+                    continue
+
+                # Tính từ ngày hôm sau ngày cuối cùng đã có
+                from_date = (last + timedelta(days=1)).strftime("%Y-%m-%d") if last else None
+                if self.run_one(sym, from_date):
+                    ok += 1
+                else:
+                    fail += 1
+            except Exception as e:
+                logger.error(f"❌ {sym}: {e}")
+                fail += 1
+
+        logger.info(
+            f"✅ Bảo trì xong: {ok} cập nhật / {skip} bỏ qua / {fail} lỗi"
+        )
+
+    def run_single_date(self, symbol: str, date: str) -> pd.Series | None:
+        """
+        Tính indicators cho MỘT NGÀY CỤ THỂ của một mã.
+        Trả về pd.Series chứa tất cả giá trị indicators.
+        """
+        raw = self._fetch_prices(symbol, date)  # warmup đã có sẵn
+        if raw.empty:
+            return None
+        raw["symbol"] = symbol
+        result = self._compute(symbol, raw, from_date=None)
+        row = result[result["trading_date"] == pd.Timestamp(date)]
+        return row.squeeze() if not row.empty else None
+
+
+# ═══════════════════════════════════════════════════════════════
+# CLI ENTRY POINT
+# ═══════════════════════════════════════════════════════════════
+
+if __name__ == "__main__":
+    import sys
+    import logging
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        handlers=[logging.StreamHandler(sys.stdout)],
+    )
+
+    db = DatabaseHandler()
+    svc = IndicatorService(db)
+
+    while True:
+        print("\n" + "=" * 50)
+        print("INDICATOR SERVICE")
+        print("=" * 50)
+        print("1. Tính 1 mã (toàn bộ lịch sử)")
+        print("2. Tính 1 mã từ ngày cụ thể")
+        print("3. Tính tất cả mã (1 sàn)")
+        print("4. Bảo trì (chỉ ngày còn thiếu)")
+        print("5. Kiểm tra 1 ngày cụ thể (debug)")
+        print("6. Thoát")
+
+        choice = input("Lựa chọn (1-6): ").strip()
+
+        if choice == "1":
+            sym = input("Mã (ví dụ SSI): ").strip().upper()
+            svc.run_one(sym)
+
+        elif choice == "2":
+            sym  = input("Mã: ").strip().upper()
+            date = input("Từ ngày (YYYY-MM-DD): ").strip()
+            svc.run_one(sym, from_date=date)
+
+        elif choice == "3":
+            market = input("Sàn (HOSE/HNX/UPCOM, mặc định HOSE): ").strip() or "HOSE"
+            date   = input("Từ ngày (YYYY-MM-DD, Enter = toàn bộ): ").strip() or None
+            svc.run_all(market, from_date=date)
+
+        elif choice == "4":
+            market = input("Sàn (mặc định HOSE): ").strip() or "HOSE"
+            svc.run_maintenance(market)
+
+        elif choice == "5":
+            sym  = input("Mã: ").strip().upper()
+            date = input("Ngày (YYYY-MM-DD): ").strip()
+            row  = svc.run_single_date(sym, date)
+            if row is not None:
+                print(f"\n── Indicators {sym} @ {date} ──")
+                print(row.to_string())
+            else:
+                print("Không có dữ liệu.")
+
+        elif choice == "6":
+            print("Thoát.")
+            break
+        else:
+            print("Vui lòng nhập 1-6.")
