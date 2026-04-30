@@ -5,7 +5,7 @@
 
 import json
 import logging
-
+import numpy as np
 import pandas as pd
 import streamlit as st
 from datetime import datetime, timedelta, date as date_type
@@ -20,7 +20,6 @@ from gap_service import GapRepairService
 from indicator_service import IndicatorService
 from signal_service import SignalService
 import config
-
 
 # ════════════════════════════════════════════════════════════════════════════
 # PAGE CONFIG
@@ -41,7 +40,6 @@ st.markdown("""
     .block-container { padding-top:1.2rem; }
 </style>
 """, unsafe_allow_html=True)
-
 
 # ════════════════════════════════════════════════════════════════════════════
 # LOGGING — capture vào session_state, hiển thị trong st.status
@@ -103,13 +101,12 @@ def load_symbols() -> pd.DataFrame:
     except Exception:
         return pd.DataFrame(columns=["symbol", "stock_name", "market"])
 
-
 def _fetch_price_with_warmup(symbol: str, start: date_type, end: date_type) -> pd.DataFrame:
     """Fetch giá với warmup 270 ngày lịch để MA200 hội tụ đúng."""
     warmup = start - timedelta(days=270)
     q = text("""
         SELECT trading_date, open_price, highest_price, lowest_price,
-               close_price, close_price_adjusted, total_match_vol
+               close_price, close_price_adjusted, total_match_vol,foreign_buy_vol_total, foreign_sell_vol_total
         FROM daily_stock_prices
         WHERE symbol = :sym
           AND trading_date BETWEEN :s AND :e
@@ -127,7 +124,6 @@ def _fetch_price_with_warmup(symbol: str, start: date_type, end: date_type) -> p
         logging.error(f"Lỗi fetch price {symbol}: {ex}")
         return pd.DataFrame()
 
-
 def _fetch_signals_for_chart(symbol: str, start: date_type, end: date_type) -> pd.DataFrame:
     q = text("""
         SELECT signal_date, signal_type, signal_direction, strength, close_price
@@ -143,6 +139,27 @@ def _fetch_signals_for_chart(symbol: str, start: date_type, end: date_type) -> p
     except Exception:
         return pd.DataFrame()
 
+def _fetch_indicator_data(symbol: str, start: date_type, end: date_type) -> pd.DataFrame:
+    """Lấy dữ liệu indicators từ technical_indicators"""
+    q = text("""
+        SELECT trading_date, vol_ma20
+        FROM technical_indicators
+        WHERE symbol = :sym
+          AND trading_date BETWEEN :s AND :e
+        ORDER BY trading_date
+    """)
+    try:
+        with db.engine.connect() as conn:
+            df = pd.read_sql(q, conn, params={
+                "sym": symbol,
+                "s": start,
+                "e": end
+            })
+        df["trading_date"] = pd.to_datetime(df["trading_date"]).dt.date
+        return df
+    except Exception as e:
+        logging.error(f"Lỗi lấy indicators cho {symbol}: {e}")
+        return pd.DataFrame()
 
 # ════════════════════════════════════════════════════════════════════════════
 # CHART HELPERS
@@ -156,7 +173,6 @@ _MA_COLORS  = {
 }
 _MA_PERIODS = {"MA5": 5, "MA10": 10, "MA20": 20, "MA50": 50, "MA200": 200}
 
-
 def _compute_adj_prices(raw: pd.DataFrame) -> pd.DataFrame:
     """Thêm cột adj_* và cột time string. Không sửa raw gốc."""
     df = raw.copy()
@@ -167,7 +183,6 @@ def _compute_adj_prices(raw: pd.DataFrame) -> pd.DataFrame:
     df["adj_close"] = df["close_price_adjusted"].round(2)
     df["time"]      = df["trading_date"].apply(lambda d: d.strftime("%Y-%m-%d"))
     return df
-
 
 def _build_ma_series(raw_adj: pd.DataFrame, selected_mas: list, start: date_type) -> list:
     """Tính MA từ adj_close, chỉ render từ start trở đi (warmup đã hội tụ)."""
@@ -198,7 +213,6 @@ def _build_ma_series(raw_adj: pd.DataFrame, selected_mas: list, start: date_type
         })
     return series
 
-
 def _build_markers(sig_df: pd.DataFrame) -> list:
     markers = []
     for _, r in sig_df.iterrows():
@@ -213,12 +227,17 @@ def _build_markers(sig_df: pd.DataFrame) -> list:
         })
     return sorted(markers, key=lambda m: m["time"])
 
-
-def _render_chart(price_df: pd.DataFrame, ma_series: list,
-                  markers: list, chart_type: str, key: str):
+def _render_chart(price_df: pd.DataFrame, ma_series: list, markers: list, chart_type: str, key: str):
     """Render lightweight-charts: panel giá + panel volume."""
     bg   = {"type": "solid", "color": "#ffffff"}
     grid = {"vertLines": {"color": "#f0f0f0"}, "horzLines": {"color": "#f0f0f0"}}
+
+    # --- Dữ liệu Volume MA20 từ price_df  ---
+    ma_vol_series = price_df[['time', 'vol_ma20']].dropna()
+    ma_vol_data = [
+        {"time": row['time'], "value": float(row['vol_ma20'])}
+        for _, row in ma_vol_series.iterrows()
+    ]
 
     if chart_type == "Nến (Candlestick)":
         main_data = [
@@ -283,15 +302,29 @@ def _render_chart(price_df: pd.DataFrame, ma_series: list,
                     "scaleMargins": {"top": 0.05, "bottom": 0},
                 },
             },
-            "series": [{
-                "type"   : "Histogram",
-                "data"   : vol_data,
-                "options": {"priceFormat":{"type":"volume"},"priceScaleId":""},
-            }],
+            "series": [
+                {
+                    "type": "Histogram",
+                    "data": vol_data,   # vẫn dùng vol_data như cũ
+                    "options": {"priceFormat":{"type":"volume"},"priceScaleId":""},
+                },
+                {
+                    "type": "Line",
+                    "data": ma_vol_data,
+                    "options": {
+                        "color": "#FF6D00",
+                        "lineWidth": 2,
+                        "priceLineVisible": False,
+                        "lastValueVisible": True,
+                        "title": "MAVol20",
+                        "priceFormat": {"type": "volume", "precision": 0},
+                        "priceScaleId": ""
+                    },
+                },
+            ],
         },
     ]
     renderLightweightCharts(charts, key=key)
-
 
 # ════════════════════════════════════════════════════════════════════════════
 # LAYOUT
@@ -301,9 +334,8 @@ symbols_df = load_symbols()
 has_data   = not symbols_df.empty
 
 tab1, tab2, tab3, tab4 = st.tabs([
-    "⚙️ Đồng bộ", "📊 Biểu đồ", "🔔 Signals", "🧮 Indicators",
+    "Data", "Chart", "Signals", "🧮 Upcoming",
 ])
-
 
 # ════════════════════════════════════════════════════════════════════════════
 # TAB 1 — ĐỒNG BỘ DỮ LIỆU
@@ -312,7 +344,7 @@ with tab1:
     st.info(f"🖥️ **Database:** `{db.engine.url.host}` | **Schema:** `{db.engine.url.database}`")
 
     # --- PHẦN 1: ĐỒNG BỘ DỮ LIỆU THÔ ---
-    st.subheader("1. Đồng bộ dữ liệu từ SSI")
+    st.subheader("1. Đồng bộ dữ liệu")
     col1, col2 = st.columns([2, 1])
     with col1:
         func = st.selectbox("Tác vụ đồng bộ", [
@@ -398,7 +430,7 @@ with tab1:
         s_sym = st.text_input("Mã", value="SSI", key="s_s") if s_mode == "1 mã" else ""
         s_date = st.date_input("Từ ngày (trống=all)", value=None, key="s_d") if s_mode != "Bảo trì (thiếu)" else None
 
-        if st.button("Phát hiện Signals", use_container_width=True):
+        if st.button("Tìm Signals", use_container_width=True):
             with st.status("Đang quét...") as s:
                 fd = s_date.strftime("%Y-%m-%d") if s_date else None
                 if s_mode == "Bảo trì (thiếu)":
@@ -411,8 +443,6 @@ with tab1:
 
     with st.expander("Logs hệ thống"):
         st.code("\n".join(st.session_state.get("log_messages", [])) or "Chưa có log.")
-
-
 # ════════════════════════════════════════════════════════════════════════════
 # TAB 2 — BIỂU ĐỒ
 # ════════════════════════════════════════════════════════════════════════════
@@ -422,38 +452,36 @@ with tab2:
         st.warning("Chưa có dữ liệu. Hãy đồng bộ danh mục securities ở Tab Đồng bộ trước.")
     else:
         # ── Controls ─────────────────────────────────────────────
-        c1, c2, c3, c4 = st.columns([2, 1, 1, 2])
+        c1, c2, c3, c4, c5 = st.columns([0.80, 1, 0.6, 1.3, 1.7])
+
         with c1:
-            sym_list   = symbols_df["symbol"].tolist()
+            sym_list = symbols_df["symbol"].tolist()
             default_ix = sym_list.index("SSI") if "SSI" in sym_list else 0
-            t2_symbol  = st.selectbox("Mã chứng khoán", sym_list, index=default_ix, key="t2_sym")
+            t2_symbol = st.selectbox("Mã chứng khoán", sym_list, index=default_ix, key="t2_sym")
         with c2:
             t2_chart_type = st.selectbox("Loại biểu đồ",
-                ["Nến (Candlestick)","Đường (Close)"], key="t2_chart_type")
+                                         ["Nến (Candlestick)", "Đường (Close)"], key="t2_chart_type")
         with c3:
             t2_period = st.selectbox("Chu kỳ",
-                ["1 tháng","3 tháng","6 tháng","1 năm","2 năm","Toàn bộ"],
-                index=2, key="t2_period")
+                                     ["1 tháng", "3 tháng", "6 tháng", "1 năm", "2 năm", "Toàn bộ"],
+                                     index=3, key="t2_period")
         with c4:
             t2_mas = st.multiselect("Đường MA overlay",
-                ["MA5","MA10","MA20","MA50","MA200"],
-                default=["MA20","MA50"], key="t2_mas")
-
-        sf1, sf2 = st.columns([1, 2])
-        with sf1:
-            t2_show_sig = st.checkbox("Hiển thị tín hiệu", value=True, key="t2_show_sig")
-        with sf2:
-            # Luôn định nghĩa t2_sig_filter trước khi dùng — tránh NameError
-            t2_sig_filter: list = []
-            if t2_show_sig:
-                t2_sig_filter = st.multiselect(
-                    "Lọc loại tín hiệu (trống = tất cả)",
-                    ["MA_GOLDEN_CROSS","MA_DEATH_CROSS","RSI_OVERSOLD","RSI_OVERBOUGHT",
-                     "MACD_BULLISH_CROSS","MACD_BEARISH_CROSS",
-                     "BB_SQUEEZE_BREAKOUT_UP","BB_SQUEEZE_BREAKOUT_DOWN",
-                     "VOLUME_SPIKE","FOREIGN_ACCUMULATION","FOREIGN_DISTRIBUTION"],
-                    default=[], key="t2_sig_filter",
-                )
+                                    ["MA5", "MA10", "MA20", "MA50", "MA200"],
+                                    default=["MA20", "MA50"], key="t2_mas")
+        with c5:
+            ALL_SIGNAL_TYPES = [
+                "MA_GOLDEN_CROSS", "MA_DEATH_CROSS", "RSI_OVERSOLD", "RSI_OVERBOUGHT",
+                "MACD_BULLISH_CROSS", "MACD_BEARISH_CROSS",
+                "BB_SQUEEZE_BREAKOUT_UP", "BB_SQUEEZE_BREAKOUT_DOWN",
+                "VOLUME_SPIKE", "FOREIGN_ACCUMULATION", "FOREIGN_DISTRIBUTION"
+            ]
+            t2_sig_filter = st.multiselect(
+                "Hiển thị tín hiệu",
+                ALL_SIGNAL_TYPES,
+                default=['MA_GOLDEN_CROSS'],  # mặc định bật toàn bộ
+                key="t2_sig_filter"
+                    )
 
         # ── Date range ───────────────────────────────────────────
         today = datetime.now().date()
@@ -462,6 +490,7 @@ with tab2:
             "1 năm": 365, "2 năm": 730, "Toàn bộ": 3650,
         }
         start_date = today - timedelta(days=period_days[t2_period])
+        t2_show_sig = len(t2_sig_filter) > 0
 
         # ── Fetch & process ──────────────────────────────────────
         raw_df = _fetch_price_with_warmup(t2_symbol, start_date, today)
@@ -471,6 +500,13 @@ with tab2:
         else:
             raw_adj  = _compute_adj_prices(raw_df)
             price_df = raw_adj[raw_adj["trading_date"] >= start_date].reset_index(drop=True)
+            ind_df = _fetch_indicator_data(t2_symbol, start_date, today)
+
+            if not ind_df.empty:
+                price_df = price_df.merge(ind_df, on="trading_date", how="left")
+            else:
+                # Nếu không có indicator, tạo cột vol_ma20 rỗng để tránh lỗi
+                price_df["vol_ma20"] = np.nan
 
             if price_df.empty:
                 st.warning("Không đủ dữ liệu sau khi filter theo ngày.")
@@ -489,13 +525,15 @@ with tab2:
                     f"<span style='font-size:14px;color:#6b7280'>{stock_name}</span>",
                     unsafe_allow_html=True,
                 )
-                m1, m2, m3, m4, m5 = st.columns(5)
-                m1.metric("Đóng cửa",   f"{last['adj_close']:,.2f}",
-                                         f"{chg:+.2f} ({chg_pct:+.2f}%)")
-                m2.metric("Cao nhất",   f"{last['adj_high']:,.2f}")
-                m3.metric("Thấp nhất",  f"{last['adj_low']:,.2f}")
+                # Hiển thị thông tin
+                m1, m2, m3, m4, m5, m6 = st.columns(6)
+                m1.metric("Đóng cửa",   f"{last['adj_close']:,.0f}",
+                                         f"{chg:+.2f} ({chg_pct:+.0f}%)")
+                m2.metric("Cao nhất",   f"{last['adj_high']:,.0f}")
+                m3.metric("Thấp nhất",  f"{last['adj_low']:,.0f}")
                 m4.metric("Khối lượng", f"{last['total_match_vol']/1e6:.2f}M")
-                m5.metric("Số nến",     f"{len(price_df):,}")
+                m5.metric("Khối ngoại mua", f"{last['foreign_buy_vol_total'] / 1e6:.2f}M")
+                m6.metric("Khối ngoại bán", f"{last['foreign_sell_vol_total'] / 1e6:.2f}M")
 
                 # MA series & signal markers
                 ma_series = _build_ma_series(raw_adj, t2_mas, start_date) if t2_mas else []
@@ -503,43 +541,46 @@ with tab2:
                 sig_df = pd.DataFrame()
                 if t2_show_sig:
                     sig_df = _fetch_signals_for_chart(t2_symbol, start_date, today)
-                    if not sig_df.empty and t2_sig_filter:
+                    if not sig_df.empty:
                         sig_df = sig_df[sig_df["signal_type"].isin(t2_sig_filter)]
 
                 markers = _build_markers(sig_df) if not sig_df.empty else []
 
-                # Render
-                chart_key = (f"c_{t2_symbol}_{start_date}_{t2_chart_type}"
-                             f"_{''.join(t2_mas)}_{t2_show_sig}")
-                _render_chart(price_df, ma_series, markers, t2_chart_type, chart_key)
+                # ═══ Layout: Biểu đồ (trái) + Tín hiệu (phải) ═══
+                col_chart, col_signals = st.columns([3, 1])
 
-                # MA Legend
-                if t2_mas:
-                    parts = []
-                    for ma in t2_mas:
-                        n    = _MA_PERIODS[ma]
-                        vals = raw_adj["adj_close"].rolling(n, min_periods=n).mean().dropna()
-                        v    = f"{vals.iloc[-1]:,.2f}" if not vals.empty else "—"
-                        parts.append(
-                            f"<span style='background:{_MA_COLORS[ma]};color:#fff;"
-                            f"padding:2px 9px;border-radius:10px;"
-                            f"font-size:12px;margin:2px'>{ma}: {v}</span>"
-                        )
-                    st.markdown(" ".join(parts), unsafe_allow_html=True)
+                with col_chart:
+                    chart_key = (f"c_{t2_symbol}_{start_date}_{t2_chart_type}"
+                                 f"_{''.join(t2_mas)}_{t2_show_sig}")
+                    _render_chart(price_df, ma_series, markers, t2_chart_type, chart_key)
 
-                # Signal table
-                if t2_show_sig and not sig_df.empty:
-                    with st.expander(f"📋 Tín hiệu trong kỳ — {len(sig_df)} bản ghi"):
-                        t_disp = sig_df[["signal_date","signal_type","signal_direction",
-                                         "strength","close_price"]].copy()
-                        t_disp.columns = ["Ngày","Loại tín hiệu","Chiều","Strength","Giá"]
+                    # MA Legend
+                    if t2_mas:
+                        parts = []
+                        for ma in t2_mas:
+                            n = _MA_PERIODS[ma]
+                            vals = raw_adj["adj_close"].rolling(n, min_periods=n).mean().dropna()
+                            v = f"{vals.iloc[-1]:,.2f}" if not vals.empty else "—"
+                            parts.append(
+                                f"<span style='background:{_MA_COLORS[ma]};color:#fff;"
+                                f"padding:2px 9px;border-radius:10px;"
+                                f"font-size:12px;margin:2px'>{ma}: {v}</span>"
+                            )
+                        st.markdown(" ".join(parts), unsafe_allow_html=True)
+
+                with col_signals:
+                    if t2_show_sig and not sig_df.empty:
+                        st.markdown(f"#### Có {len(sig_df)} tín hiệu")
+                        t_disp = sig_df[["signal_date", "signal_type", "signal_direction",
+                                         "strength", "close_price"]].copy()
+                        t_disp.columns = ["Ngày", "Loại tín hiệu", "Chiều", "Strength", "Giá"]
                         t_disp = t_disp.sort_values("Ngày", ascending=False).reset_index(drop=True)
                         st.dataframe(
-                            t_disp.style.format({"Strength":"{:.2%}","Giá":"{:,.2f}"}),
-                            use_container_width=True, height=250,
+                            t_disp.style.format({"Strength": "{:.2%}", "Giá": "{:,.2f}"}),
+                            use_container_width=True, height=320,
                         )
-
-
+                    elif t2_show_sig:
+                        st.info("Không có tín hiệu nào trong kỳ.")
 # ════════════════════════════════════════════════════════════════════════════
 # TAB 3 — SIGNALS SCREENER
 # ════════════════════════════════════════════════════════════════════════════
@@ -664,10 +705,8 @@ with tab3:
                         unsafe_allow_html=True,
                     )
                     st.json(params)
-
-
 # ════════════════════════════════════════════════════════════════════════════
-# TAB 4 — INDICATORS & SIGNALS MANAGEMENT
+# TAB 4 —
 # ════════════════════════════════════════════════════════════════════════════
 with tab4:
     st.subheader("DEV")

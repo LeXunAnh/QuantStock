@@ -116,6 +116,7 @@ class IndicatorService:
         try:
             with self.db.engine.connect() as conn:
                 df = pd.read_sql(query, conn, params=params)
+            df["trading_date"] = pd.to_datetime(df["trading_date"])
             return df
         except Exception as e:
             logger.error(f"❌ Lỗi fetch giá {symbol}: {e}")
