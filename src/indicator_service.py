@@ -264,7 +264,6 @@ class IndicatorService:
         row = result[result["trading_date"] == pd.Timestamp(date)]
         return row.squeeze() if not row.empty else None
 
-
 # ═══════════════════════════════════════════════════════════════
 # CLI ENTRY POINT
 # ═══════════════════════════════════════════════════════════════
