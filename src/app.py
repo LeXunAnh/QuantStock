@@ -9,16 +9,20 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 from datetime import datetime, timedelta, date as date_type
+
+from matplotlib import pyplot as plt
 from sqlalchemy import text
 from streamlit_lightweight_charts import renderLightweightCharts
 
-from DatabaseHandler import DatabaseHandler
+from DatabaseHandler import DatabaseHandler,logger
 from api_client import SSIAPIClient
 from transformer import DataTransformer
 from sync_service import SyncService
 from gap_service import GapRepairService
 from indicator_service import IndicatorService
 from signal_service import SignalService
+from pnf_services import PNFService
+
 import config
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -82,6 +86,7 @@ def init_services():
     gap_svc     = GapRepairService(db, sync_svc)
     ind_svc     = IndicatorService(db)
     sig_svc     = SignalService(db)
+
     return db, sync_svc, gap_svc, ind_svc, sig_svc
 
 db, sync_service, gap_service, indicator_svc, signal_svc = init_services()
@@ -581,6 +586,7 @@ with tab2:
                         )
                     elif t2_show_sig:
                         st.info("Không có tín hiệu nào trong kỳ.")
+                        
 # ════════════════════════════════════════════════════════════════════════════
 # TAB 3 — SIGNALS SCREENER
 # ════════════════════════════════════════════════════════════════════════════
@@ -709,4 +715,63 @@ with tab3:
 # TAB 4 —
 # ════════════════════════════════════════════════════════════════════════════
 with tab4:
-    st.subheader("DEV")
+    st.subheader("📐 Point & Figure Chart")
+
+    # Instantiate service (you already have db)
+    pnf_svc = PNFService(db)
+
+    # Controls
+    cA, cB, cC, cD = st.columns(4)
+    with cA:
+        pnf_symbol = st.selectbox("Mã chứng khoán", symbols_df["symbol"].tolist(),
+                                  index=0, key="pnf_sym")
+    with cB:
+        pnf_method = st.selectbox("Phương pháp", ["cl", "h/l", "l/h", "hlc", "ohlc"],
+                                  index=0, key="pnf_method")
+    with cC:
+        pnf_reversal = st.number_input("Reversal", min_value=1, max_value=5,
+                                       value=3, step=1, key="pnf_rev")
+    with cD:
+        pnf_scaling = st.selectbox("Scaling", ["log", "abs", "cla", "atr"],
+                                   index=0, key="pnf_scaling")
+
+    # Boxsize depends on scaling
+    if pnf_scaling == "log":
+        pnf_boxsize = st.number_input("Boxsize (%)", value=1.0, min_value=0.01, step=0.1,
+                                      format="%.2f", key="pnf_bs")
+    elif pnf_scaling == "cla":
+        pnf_boxsize = st.selectbox("Boxsize", [0.02, 0.05, 0.1, 0.25, 1 / 3, 0.5, 1, 2],
+                                   index=5, key="pnf_bs")
+    else:
+        pnf_boxsize = st.number_input("Boxsize", value=1.0, min_value=0.01,
+                                      format="%.2f", key="pnf_bs")
+
+    pnf_show_bo = st.checkbox("Hiện breakouts", value=True)
+    pnf_show_tl = st.checkbox("Hiện trendlines (external 45°)", value=False)
+
+    if st.button("🔍 Tạo biểu đồ P&F", type="primary"):
+        with st.spinner("Đang tính toán P&F..."):
+            try:
+                chart = pnf_svc.build_chart(pnf_symbol,
+                                            method=pnf_method,
+                                            reversal=pnf_reversal,
+                                            boxsize=pnf_boxsize,
+                                            scaling=pnf_scaling)
+                fig = PNFService.get_plot(chart,
+                                          show_breakouts=pnf_show_bo,
+                                          show_trendlines=pnf_show_tl)
+                st.pyplot(fig)
+                plt.close(fig)  # optional cleanup
+
+                # Optional: display breakouts / trendlines as tables
+                if pnf_show_bo:
+                    bo_df = PNFService.get_breakouts_df(chart)
+                    st.markdown("**Breakouts**")
+                    st.dataframe(bo_df, use_container_width=True, height=200)
+                if pnf_show_tl:
+                    tl_df = PNFService.get_trendlines_df(chart)
+                    st.markdown("**Trendlines**")
+                    st.dataframe(tl_df, use_container_width=True, height=200)
+
+            except Exception as e:
+                st.error(f"Lỗi: {e}")
