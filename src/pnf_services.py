@@ -87,9 +87,9 @@ class PNFService:
     # ------------------------------------------------------------------
     def build_chart(self,
                     symbol: str,
-                    method: str = "cl",
+                    method: str = "h/l",
                     reversal: int = 3,
-                    boxsize: float = 1.0,
+                    boxsize: float = 2.0,
                     scaling: str = "log",
                     from_date: Optional[date_type] = None,
                     to_date: Optional[date_type] = None,
@@ -130,16 +130,27 @@ class PNFService:
 
     @staticmethod
     def get_trendlines_df(chart: PointFigureChart,
-                          length: int = 4, mode: str = "strong") -> pd.DataFrame:
+                          length: int = 6, mode: str = "strong") -> pd.DataFrame:
         """Return trendlines as a user‑friendly DataFrame."""
+        # 1. Gọi hàm lấy trendline từ thư viện
         tl = chart.get_trendlines(length=length, mode=mode)
-        return pd.DataFrame({
-            "bounded": tl["bounded"],
-            "type":    tl["type"],
-            "length":  tl["length"],
-            "col_start": tl["column index"],
-            "box_start": tl["box index"],
-        })
+
+        # 2. Kiểm tra nếu không có trendline nào (tl là None hoặc dict rỗng)
+        if tl is None or not isinstance(tl, dict) or len(tl.get("type", [])) == 0:
+            return pd.DataFrame(columns=["bounded", "type", "length", "col_start", "box_start"])
+
+        # 3. Sử dụng .get() để tránh crash nếu thiếu key và đảm bảo dữ liệu tồn tại
+        try:
+            return pd.DataFrame({
+                "bounded": tl.get("bounded", []),
+                "type": tl.get("type", []),
+                "length": tl.get("length", []),
+                "col_start": tl.get("column index", []),
+                "box_start": tl.get("box index", []),
+            })
+        except Exception as e:
+            # Trường hợp dữ liệu trả về bị lệch độ dài mảng
+            return pd.DataFrame(columns=["bounded", "type", "length", "col_start", "box_start"])
 
     # ------------------------------------------------------------------
     # 5. Plotting helper (for Streamlit)
@@ -155,11 +166,11 @@ class PNFService:
         # Apply display options
         chart.show_breakouts = show_breakouts
         chart.show_trendlines = "external" if show_trendlines else False
-        chart.size = "medium"          # change to your preference
+        chart.size = "auto"          # change to your preference
         chart.grid = True
         chart.show_markers = True
 
         # Build the figure (does not call plt.show())
         chart._assemble_plot_chart()
-        chart.fig.set_size_inches(12, 12)
+        chart.fig.set_size_inches(8, 6)
         return chart.fig
