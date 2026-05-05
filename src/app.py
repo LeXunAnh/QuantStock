@@ -488,6 +488,29 @@ with tab2:
                 key="t2_sig_filter"
                     )
 
+        st.markdown("P&F Settings")
+
+        cA, cB, cC, cD = st.columns(4)
+
+        with cA:
+            pnf_method = st.selectbox("Method",
+                                      ["h/l", "ohlc", "l/h", "hlc", "cl"],
+                                      key="pnf_method")
+
+        with cB:
+            pnf_reversal = st.number_input("Reversal", 1, 5, 3, key="pnf_rev")
+
+        with cC:
+            pnf_scaling = st.selectbox("Scaling",
+                                       ["log", "abs", "cla", "atr"],
+                                       key="pnf_scaling")
+
+        with cD:
+            pnf_boxsize = st.number_input("Boxsize", value=2.0, key="pnf_bs")
+
+        pnf_show_bo = st.checkbox("Breakouts", True)
+        pnf_show_tl = st.checkbox("Trendlines", False)
+
         # ── Date range ───────────────────────────────────────────
         today = datetime.now().date()
         period_days = {
@@ -552,9 +575,9 @@ with tab2:
                 markers = _build_markers(sig_df) if not sig_df.empty else []
 
                 # ═══ Layout: Biểu đồ (trái) + Tín hiệu (phải) ═══
-                col_chart, col_signals = st.columns([3, 1])
+                col_left, col_right = st.columns([3, 2])
 
-                with col_chart:
+                with col_left:
                     chart_key = (f"c_{t2_symbol}_{start_date}_{t2_chart_type}"
                                  f"_{''.join(t2_mas)}_{t2_show_sig}")
                     _render_chart(price_df, ma_series, markers, t2_chart_type, chart_key)
@@ -573,7 +596,33 @@ with tab2:
                             )
                         st.markdown(" ".join(parts), unsafe_allow_html=True)
 
-                with col_signals:
+                with col_right:
+                    with st.spinner("Đang tính toán P&F..."):
+                        try:
+                            pnf_svc = PNFService(db)
+
+                            chart = pnf_svc.build_chart(
+                                t2_symbol,  # dùng chung symbol
+                                method=pnf_method,
+                                reversal=pnf_reversal,
+                                boxsize=pnf_boxsize,
+                                scaling=pnf_scaling
+                            )
+
+                            fig = PNFService.get_plot(chart,
+                                show_breakouts=pnf_show_bo,
+                                show_trendlines=pnf_show_tl
+                            )
+
+                            st.pyplot(fig)
+                            plt.close(fig)
+
+                        except Exception as e:
+                            st.error(f"Lỗi P&F: {e}")
+
+                st.markdown("Signals")
+                col_signal1,col_signal2 = st.columns(2)
+                with col_signal1:
                     if t2_show_sig and not sig_df.empty:
                         st.markdown(f"#### Có {len(sig_df)} tín hiệu")
                         t_disp = sig_df[["signal_date", "signal_type", "signal_direction",
@@ -715,63 +764,4 @@ with tab3:
 # TAB 4 —
 # ════════════════════════════════════════════════════════════════════════════
 with tab4:
-    st.subheader("📐 Point & Figure Chart")
-
-    # Instantiate service (you already have db)
-    pnf_svc = PNFService(db)
-
-    # Controls
-    cA, cB, cC, cD = st.columns(4)
-    with cA:
-        pnf_symbol = st.selectbox("Mã chứng khoán", symbols_df["symbol"].tolist(),
-                                  index=0, key="pnf_sym")
-    with cB:
-        pnf_method = st.selectbox("Phương pháp", ["cl", "h/l", "l/h", "hlc", "ohlc"],
-                                  index=0, key="pnf_method")
-    with cC:
-        pnf_reversal = st.number_input("Reversal", min_value=1, max_value=5,
-                                       value=3, step=1, key="pnf_rev")
-    with cD:
-        pnf_scaling = st.selectbox("Scaling", ["log", "abs", "cla", "atr"],
-                                   index=0, key="pnf_scaling")
-
-    # Boxsize depends on scaling
-    if pnf_scaling == "log":
-        pnf_boxsize = st.number_input("Boxsize (%)", value=1.0, min_value=0.01, step=0.1,
-                                      format="%.2f", key="pnf_bs")
-    elif pnf_scaling == "cla":
-        pnf_boxsize = st.selectbox("Boxsize", [0.02, 0.05, 0.1, 0.25, 1 / 3, 0.5, 1, 2],
-                                   index=5, key="pnf_bs")
-    else:
-        pnf_boxsize = st.number_input("Boxsize", value=1.0, min_value=0.01,
-                                      format="%.2f", key="pnf_bs")
-
-    pnf_show_bo = st.checkbox("Hiện breakouts", value=True)
-    pnf_show_tl = st.checkbox("Hiện trendlines (external 45°)", value=False)
-
-    if st.button("🔍 Tạo biểu đồ P&F", type="primary"):
-        with st.spinner("Đang tính toán P&F..."):
-            try:
-                chart = pnf_svc.build_chart(pnf_symbol,
-                                            method=pnf_method,
-                                            reversal=pnf_reversal,
-                                            boxsize=pnf_boxsize,
-                                            scaling=pnf_scaling)
-                fig = PNFService.get_plot(chart,
-                                          show_breakouts=pnf_show_bo,
-                                          show_trendlines=pnf_show_tl)
-                st.pyplot(fig)
-                plt.close(fig)  # optional cleanup
-
-                # Optional: display breakouts / trendlines as tables
-                if pnf_show_bo:
-                    bo_df = PNFService.get_breakouts_df(chart)
-                    st.markdown("**Breakouts**")
-                    st.dataframe(bo_df, use_container_width=True, height=200)
-                if pnf_show_tl:
-                    tl_df = PNFService.get_trendlines_df(chart)
-                    st.markdown("**Trendlines**")
-                    st.dataframe(tl_df, use_container_width=True, height=200)
-
-            except Exception as e:
-                st.error(f"Lỗi: {e}")
+    st.subheader("DEV")
