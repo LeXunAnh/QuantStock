@@ -1,5 +1,5 @@
-from sync_service import SyncService
-from DatabaseHandler import DatabaseHandler
+from .sync_service import SyncService
+from src.database.handler import DatabaseHandler
 from tqdm import tqdm
 import logging
 

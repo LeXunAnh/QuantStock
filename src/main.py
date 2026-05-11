@@ -3,14 +3,14 @@ import logging
 import sys
 from datetime import datetime, timedelta
 
-from DatabaseHandler import DatabaseHandler
-from api_client import SSIAPIClient
-from transformer import DataTransformer
-from sync_service import SyncService
-from gap_service import GapRepairService
-from indicator_service import IndicatorService
-from signal_service import SignalService
-from src import config
+from src.database.handler import DatabaseHandler
+from src.core.api_client import SSIAPIClient
+from src.core.transformer import DataTransformer
+from src.services.sync_service import SyncService
+from src.services.gap_service import GapRepairService
+from src.services.indicator_service import IndicatorService
+from src.services.signal_service import SignalService
+import config
 
 logging.basicConfig(
     level=logging.INFO,
