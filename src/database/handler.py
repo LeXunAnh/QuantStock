@@ -1,6 +1,5 @@
 from sqlalchemy import create_engine,text
 from sqlalchemy.pool import QueuePool
-from datetime import datetime, timedelta
 import pandas as pd
 import config
 import logging

@@ -14,14 +14,14 @@ from matplotlib import pyplot as plt
 from sqlalchemy import text
 from streamlit_lightweight_charts import renderLightweightCharts
 
-from DatabaseHandler import DatabaseHandler,logger
-from api_client import SSIAPIClient
-from transformer import DataTransformer
-from sync_service import SyncService
-from gap_service import GapRepairService
-from indicator_service import IndicatorService
-from signal_service import SignalService
-from pnf_services import PNFService
+from src.database.handler import DatabaseHandler
+from src.core.api_client import SSIAPIClient
+from src.core.transformer import DataTransformer
+from src.services.sync_service import SyncService
+from src.services.gap_service import GapRepairService
+from src.services.indicator_service import IndicatorService
+from src.services.signal_service import SignalService
+from src.services.pnf_services import PNFService
 
 import config
 
@@ -29,7 +29,7 @@ import config
 # PAGE CONFIG
 # ════════════════════════════════════════════════════════════════════════════
 st.set_page_config(
-    page_title="QuantStock",
+    page_title="DataQuant & Signal",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -334,7 +334,7 @@ def _render_chart(price_df: pd.DataFrame, ma_series: list, markers: list, chart_
 # ════════════════════════════════════════════════════════════════════════════
 # LAYOUT
 # ════════════════════════════════════════════════════════════════════════════
-st.title("📈 QuantStock")
+st.title("📈 DataQuant & Signal")
 symbols_df = load_symbols()
 has_data   = not symbols_df.empty
 

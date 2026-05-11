@@ -4,13 +4,13 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional
 
-from indicators import ma,atr,bollinger,foreign_flow,macd,rsi,stochastic,volume
+from src.indicators import ma,atr,bollinger,foreign_flow,macd,rsi,stochastic,volume
 
 import pandas as pd
 from sqlalchemy import text
 from tqdm import tqdm
 
-from DatabaseHandler import DatabaseHandler
+from src.database.handler import DatabaseHandler
 
 logger = logging.getLogger(__name__)
 

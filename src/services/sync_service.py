@@ -1,6 +1,6 @@
-from api_client import SSIAPIClient
-from transformer import DataTransformer
-from DatabaseHandler import DatabaseHandler
+from src.core.api_client import SSIAPIClient
+from src.core.transformer import DataTransformer
+from src.database.handler import DatabaseHandler
 import time
 from tqdm import tqdm
 from datetime import datetime, timedelta
