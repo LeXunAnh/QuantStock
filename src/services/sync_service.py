@@ -199,3 +199,59 @@ class SyncService:
         """Đồng bộ dữ liệu giá chi tiết cho một mã cụ thể"""
         logger.info(f"Bắt đầu đồng bộ giá chi tiết cho {symbol} từ {from_date} đến {to_date}")
         return self.fetch_daily_stock_prices(symbol, from_date, to_date)
+
+    def fetch_index_list(self, market: str = 'HOSE') -> bool:
+        """Đồng bộ danh sách index"""
+        try:
+            res = self.api.get_index_list(market, 1, 100)
+            status = res.get('status')
+
+            if status == 'Success':
+                data = res.get('data', [])
+                if not data:
+                    logger.warning(f"Không có dữ liệu index list cho {market}")
+                    return False
+                # lọc bỏ row null
+                clean_data = [
+                    item for item in data
+                    if item.get('IndexCode')]
+
+                df = self.transformer.index_list_to_df(clean_data)
+
+                if not df.empty:
+                    self.db.save_data(
+                        df,
+                        'index_list',
+                        ['index_code']
+                    )
+                logger.info(
+                    f"✅ Đã đồng bộ {len(df)} index cho {market}")
+
+                return True
+            elif status in (401, 429) or res.get('statusCode') in (401, 429):
+                logger.error(
+                    "Lỗi xác thực hoặc rate limit khi lấy index list")
+                if status == 401:
+                    self.api.get_access_token()
+                return False
+            else:
+                logger.error(f"Lỗi lấy index list: {res}")
+                return False
+        except Exception as e:
+            logger.exception(f"Lỗi fetch_index_list: {e}")
+            return False
+
+    def sync_index_lists(self):
+        """Đồng bộ danh sách chỉ số thị trường"""
+        total_success = 0
+
+        for market in ['HOSE', 'HNX', 'UPCOM']:
+
+            logger.info(f"🔄 Sync index list {market}")
+            success = self.fetch_index_list(market)
+            if success:
+                total_success += 1
+            time.sleep(0.5)
+
+        logger.info(f"✅ Hoàn tất sync index list ({total_success}/3 markets)")
+        return total_success == 3

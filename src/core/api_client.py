@@ -23,3 +23,13 @@ class SSIAPIClient:
         """Lấy dữ liệu giá chi tiết"""
         req = model.daily_stock_price(symbol, from_date, to_date, page, page_size)
         return self.client.daily_stock_price(self.config, req)
+
+    def get_index_list(self, exchange: str, page: int = 1, page_size: int = 1000) -> dict:
+        """Lấy dữ liệu giá chi tiết"""
+        req = model.index_list(exchange, page, page_size)
+        return self.client.index_list(self.config, req)
+
+    def get_daily_index(self,exchange: str,from_date: str,to_date: str,page: int = 1,page_size: int = 1000,request_id: str = "123",order_by: str = "",order_dir: str = "") -> dict:
+        """Lấy dữ liệu giá chi tiết"""
+        req = model.daily_index(request_id, exchange, from_date, to_date, page, page_size, order_by, order_dir)
+        return self.client.daily_index(self.config, req)

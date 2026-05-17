@@ -1,5 +1,6 @@
 from sqlalchemy import create_engine,text
 from sqlalchemy.pool import QueuePool
+from datetime import date as date_type, timedelta
 import pandas as pd
 import config
 import logging
@@ -151,6 +152,63 @@ class DatabaseHandler:
             logger.error(f"❌ Lỗi khi tìm gap cho {symbol}: {e}")
             return []
 
+    @staticmethod
+    def fetch_price_with_warmup(db, symbol: str, start: date_type, end: date_type, ) -> pd.DataFrame:
+        """Fetch giá với warmup 270 ngày lịch để MA200 hội tụ đúng."""
+        warmup = start - timedelta(days=270)
+        q = text("""
+            SELECT trading_date, open_price, highest_price, lowest_price,
+                   close_price, close_price_adjusted, total_match_vol,
+                   foreign_buy_vol_total, foreign_sell_vol_total
+            FROM daily_stock_prices
+            WHERE symbol = :sym
+              AND trading_date BETWEEN :s AND :e
+              AND close_price > 0
+              AND close_price_adjusted IS NOT NULL
+            ORDER BY trading_date
+        """)
+        try:
+            with db.engine.connect() as conn:
+                df = pd.read_sql(q, conn, params={"sym": symbol, "s": warmup, "e": end})
+            df["trading_date"] = pd.to_datetime(df["trading_date"]).dt.date
+            return df
+        except Exception as ex:
+            logging.error(f"Lỗi fetch price {symbol}: {ex}")
+            return pd.DataFrame()
+
+    @staticmethod
+    def fetch_signals_for_chart(db, symbol: str, start: date_type, end: date_type, ) -> pd.DataFrame:
+        q = text("""
+            SELECT signal_date, signal_type, signal_direction, strength, close_price
+            FROM trading_signals
+            WHERE symbol = :sym AND signal_date BETWEEN :s AND :e
+            ORDER BY signal_date
+        """)
+        try:
+            with db.engine.connect() as conn:
+                df = pd.read_sql(q, conn, params={"sym": symbol, "s": start, "e": end})
+            df["signal_date"] = pd.to_datetime(df["signal_date"]).dt.date
+            return df
+        except Exception:
+            return pd.DataFrame()
+
+    @staticmethod
+    def fetch_indicator_data(db, symbol: str, start: date_type, end: date_type, ) -> pd.DataFrame:
+        q = text("""
+            SELECT trading_date, vol_ma20
+            FROM technical_indicators
+            WHERE symbol = :sym
+              AND trading_date BETWEEN :s AND :e
+            ORDER BY trading_date
+        """)
+        try:
+            with db.engine.connect() as conn:
+                df = pd.read_sql(q, conn, params={"sym": symbol, "s": start, "e": end})
+            df["trading_date"] = pd.to_datetime(df["trading_date"]).dt.date
+            return df
+        except Exception as e:
+            logging.error(f"Lỗi lấy indicators cho {symbol}: {e}")
+            return pd.DataFrame()
 
 if __name__ == "__main__":
     #test
