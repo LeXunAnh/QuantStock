@@ -154,6 +154,39 @@ def render(db, sync_service, gap_service, indicator_svc, signal_svc) -> None:
                     signal_svc.run_all(s_mkt, fd)
                 s.update(label="✅ Xong", state="complete")
 
+    st.subheader("3. Index List Management")
+    col1, col2 = st.columns(2)
+    with col1:
+        selected_market = st.selectbox("Select Market",['HOSE', 'HNX', 'UPCOM'],key='index_market')
+    with col2:
+        if st.button(
+                "🔄 Update Index List",
+                use_container_width=True,
+                key='btn_update_index'
+        ):
+            with st.spinner(
+                    f"Đang cập nhật index list {selected_market}..."
+            ):
+                success = sync_service.fetch_index_list(
+                        selected_market
+                )
+                if success:
+                    st.success(
+                        f"✅ Đã cập nhật index list {selected_market}")
+                else:
+                    st.error(f"❌ Lỗi cập nhật index list {selected_market}")
+        if st.button(
+                "🚀 Sync All Markets",
+                use_container_width=True,
+                key='btn_sync_all_index'
+        ):
+            with st.spinner("Đang sync toàn bộ index list..."):
+                success = sync_service.sync_index_lists()
+                if success:
+                    st.success("✅ Sync toàn bộ index list thành công")
+                else:
+                    st.warning("⚠️ Một số market sync thất bại")
+
     with st.expander("Logs hệ thống"):
         st.code(
             "\n".join(st.session_state.get("log_messages", [])) or "Chưa có log."

@@ -72,3 +72,23 @@ class DataTransformer:
             'total_sell_trade_vol': pd.to_numeric(df['TotalSellTradeVol']).astype(float),
             'time_str': df['TradingDate']
         })
+
+    @staticmethod
+    def index_list_to_df(data):
+        """Transform index list API response -> DataFrame"""
+        import pandas as pd
+        rows = []
+
+        for item in data:
+            rows.append({
+                'index_code': item.get('IndexCode'),
+                'index_name': (
+                    item.get('IndexName').replace('\xa0', ' ').strip()
+                    if item.get('IndexName')
+                    else item.get('IndexCode')
+                ),
+                'exchange': item.get('Exchange')
+            })
+        df = pd.DataFrame(rows)
+        df = df.drop_duplicates(subset=['index_code'])
+        return df

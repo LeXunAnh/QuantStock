@@ -61,84 +61,7 @@ def setup_logging() -> None:
     )
     root.addHandler(handler)
 
-
-# ── Data helpers ─────────────────────────────────────────────────────────────
-
-def fetch_price_with_warmup(
-        db,
-        symbol: str,
-        start: date_type,
-        end: date_type,
-) -> pd.DataFrame:
-    """Fetch giá với warmup 270 ngày lịch để MA200 hội tụ đúng."""
-    warmup = start - timedelta(days=270)
-    q = text("""
-        SELECT trading_date, open_price, highest_price, lowest_price,
-               close_price, close_price_adjusted, total_match_vol,
-               foreign_buy_vol_total, foreign_sell_vol_total
-        FROM daily_stock_prices
-        WHERE symbol = :sym
-          AND trading_date BETWEEN :s AND :e
-          AND close_price > 0
-          AND close_price_adjusted IS NOT NULL
-        ORDER BY trading_date
-    """)
-    try:
-        with db.engine.connect() as conn:
-            df = pd.read_sql(q, conn, params={"sym": symbol, "s": warmup, "e": end})
-        df["trading_date"] = pd.to_datetime(df["trading_date"]).dt.date
-        return df
-    except Exception as ex:
-        logging.error(f"Lỗi fetch price {symbol}: {ex}")
-        return pd.DataFrame()
-
-
-def fetch_signals_for_chart(
-        db,
-        symbol: str,
-        start: date_type,
-        end: date_type,
-) -> pd.DataFrame:
-    q = text("""
-        SELECT signal_date, signal_type, signal_direction, strength, close_price
-        FROM trading_signals
-        WHERE symbol = :sym AND signal_date BETWEEN :s AND :e
-        ORDER BY signal_date
-    """)
-    try:
-        with db.engine.connect() as conn:
-            df = pd.read_sql(q, conn, params={"sym": symbol, "s": start, "e": end})
-        df["signal_date"] = pd.to_datetime(df["signal_date"]).dt.date
-        return df
-    except Exception:
-        return pd.DataFrame()
-
-
-def fetch_indicator_data(
-        db,
-        symbol: str,
-        start: date_type,
-        end: date_type,
-) -> pd.DataFrame:
-    q = text("""
-        SELECT trading_date, vol_ma20
-        FROM technical_indicators
-        WHERE symbol = :sym
-          AND trading_date BETWEEN :s AND :e
-        ORDER BY trading_date
-    """)
-    try:
-        with db.engine.connect() as conn:
-            df = pd.read_sql(q, conn, params={"sym": symbol, "s": start, "e": end})
-        df["trading_date"] = pd.to_datetime(df["trading_date"]).dt.date
-        return df
-    except Exception as e:
-        logging.error(f"Lỗi lấy indicators cho {symbol}: {e}")
-        return pd.DataFrame()
-
-
 # ── Chart builders ───────────────────────────────────────────────────────────
-
 def compute_adj_prices(raw: pd.DataFrame) -> pd.DataFrame:
     """Thêm cột adj_* và cột time string. Không sửa raw gốc."""
     df = raw.copy()
@@ -150,12 +73,7 @@ def compute_adj_prices(raw: pd.DataFrame) -> pd.DataFrame:
     df["time"] = df["trading_date"].apply(lambda d: d.strftime("%Y-%m-%d"))
     return df
 
-
-def build_ma_series(
-        raw_adj: pd.DataFrame,
-        selected_mas: list[str],
-        start: date_type,
-) -> list[dict]:
+def build_ma_series(raw_adj: pd.DataFrame,selected_mas: list[str],start: date_type,) -> list[dict]:
     """Tính MA từ adj_close, chỉ render từ start trở đi (warmup đã hội tụ)."""
     series = []
     adj = raw_adj["adj_close"]
@@ -184,7 +102,6 @@ def build_ma_series(
         })
     return series
 
-
 def build_markers(sig_df: pd.DataFrame) -> list[dict]:
     markers = []
     for _, r in sig_df.iterrows():
@@ -199,14 +116,7 @@ def build_markers(sig_df: pd.DataFrame) -> list[dict]:
         })
     return sorted(markers, key=lambda m: m["time"])
 
-
-def render_price_chart(
-        price_df: pd.DataFrame,
-        ma_series: list[dict],
-        markers: list[dict],
-        chart_type: str,
-        key: str,
-) -> None:
+def render_price_chart(price_df: pd.DataFrame,ma_series: list[dict],markers: list[dict],chart_type: str,key: str,) -> None:
     """Render lightweight-charts: panel giá + panel volume."""
     bg = {"type": "solid", "color": "#ffffff"}
     grid = {"vertLines": {"color": "#f0f0f0"}, "horzLines": {"color": "#f0f0f0"}}

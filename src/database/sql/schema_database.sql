@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS securities (
     market VARCHAR(20),
     stock_name VARCHAR(255),
     stock_en_name VARCHAR(255),
+	industry_name VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -255,3 +256,75 @@ CREATE INDEX IF NOT EXISTS idx_signals_active
 
 ADD CONSTRAINT uq_trading_signals_symbol_date_type UNIQUE (symbol, signal_date, signal_type);
 ----------------------------------------------------------------------------------------------
+-- 8. INDEX TABLE
+----------------------------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS index_list (
+    index_code VARCHAR(50) PRIMARY KEY,
+    index_name VARCHAR(255),
+    exchange VARCHAR(20),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+CREATE TABLE IF NOT EXISTS daily_index (
+    index_code VARCHAR(50) NOT NULL,
+    trading_date DATE NOT NULL,
+
+    index_value NUMERIC(18,4),
+    change NUMERIC(18,4),
+    ratio_change NUMERIC(18,10),
+
+    total_trade BIGINT,
+    total_match_vol BIGINT,
+    total_match_val NUMERIC(24,2),
+
+    total_deal_vol BIGINT,
+    total_deal_val NUMERIC(24,2),
+
+    total_vol BIGINT,
+    total_val NUMERIC(24,2),
+
+    advances INTEGER,
+    no_changes INTEGER,
+    declines INTEGER,
+    ceilings INTEGER,
+    floors INTEGER,
+
+    trading_session VARCHAR(10),
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (index_code, trading_date), 
+	
+	ADD CONSTRAINT fk_daily_index_index_code FOREIGN KEY (index_code) REFERENCES index_list(index_code)
+);
+
+CREATE INDEX idx_daily_index_date ON daily_index(trading_date);
+
+CREATE TABLE IF NOT EXISTS daily_sector_index (
+    sector_name VARCHAR(255) NOT NULL,
+    trading_date DATE NOT NULL,
+
+    open_si NUMERIC(18,4),
+    high_si NUMERIC(18,4),
+    low_si NUMERIC(18,4),
+    close_si NUMERIC(18,4),
+
+	advances INTEGER,
+	declines INTEGER,
+	no_changes INTEGER
+
+    pct_change NUMERIC(18,6),
+    total_symbols INTEGER,
+	total_vol_sector  BIGINT,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (sector_name, trading_date)
+);
+
+CREATE INDEX idx_daily_sector_index_date ON daily_sector_index(trading_date);
+CREATE INDEX idx_daily_sector_index_sector ON daily_sector_index(sector_name);
+CREATE INDEX idx_daily_sector_index_sector_date ON daily_sector_index(sector_name, trading_date);
+

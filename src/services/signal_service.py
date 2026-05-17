@@ -36,7 +36,7 @@ from sqlalchemy import text
 from tqdm import tqdm
 
 from src.database.handler import DatabaseHandler
-from src.services.sig_detect_services import SignalDetector
+from src.services.sig_detect_service import SignalDetector
 
 logger = logging.getLogger(__name__)
 
