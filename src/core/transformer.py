@@ -74,21 +74,46 @@ class DataTransformer:
         })
 
     @staticmethod
-    def index_list_to_df(data):
+    def index_list_to_df(data: List[dict]) -> pd.DataFrame:
         """Transform index list API response -> DataFrame"""
-        import pandas as pd
-        rows = []
+        if not data:
+            return pd.DataFrame()
+        df = pd.DataFrame(data)
 
-        for item in data:
-            rows.append({
-                'index_code': item.get('IndexCode'),
-                'index_name': (
-                    item.get('IndexName').replace('\xa0', ' ').strip()
-                    if item.get('IndexName')
-                    else item.get('IndexCode')
-                ),
-                'exchange': item.get('Exchange')
-            })
-        df = pd.DataFrame(rows)
-        df = df.drop_duplicates(subset=['index_code'])
-        return df
+        # Xử lý vector hóa xóa khoảng trắng bẩn (\xa0) và fallback về IndexCode nếu rỗng/None
+        index_name = df['IndexName'].str.replace('\xa0', ' ', regex=False).str.strip()
+        index_name = index_name.replace('', None).fillna(df['IndexCode'])
+
+        result_df = pd.DataFrame({
+            'index_code': df['IndexCode'],
+            'index_name': index_name,
+            'exchange': df['Exchange']
+        })
+        return result_df.drop_duplicates(subset=['index_code'])
+
+    @staticmethod
+    def daily_index_to_df(index_code: str, data: List[dict]) -> pd.DataFrame:
+        """Transform daily index data -> DataFrame"""
+        if not data:
+            return pd.DataFrame()
+        df = pd.DataFrame(data)
+        return pd.DataFrame({
+            'index_code': index_code,
+            'trading_date': pd.to_datetime(df['TradingDate'], dayfirst=True).dt.date,
+            'index_value': pd.to_numeric(df['IndexValue']).astype(float),
+            'change': pd.to_numeric(df['Change']).astype(float),
+            'ratio_change': pd.to_numeric(df['RatioChange']).astype(float),
+            'total_trade': pd.to_numeric(df['TotalTrade']).astype(int),
+            'total_match_vol': pd.to_numeric(df['TotalMatchVol']).astype(int),
+            'total_match_val': pd.to_numeric(df['TotalMatchVal']).astype(float),
+            'total_deal_vol': pd.to_numeric(df['TotalDealVol']).astype(int),
+            'total_deal_val': pd.to_numeric(df['TotalDealVal']).astype(float),
+            'total_vol': pd.to_numeric(df['TotalVol']).astype(int),
+            'total_val': pd.to_numeric(df['TotalVal']).astype(float),
+            'advances': pd.to_numeric(df['Advances']).astype(int),
+            'no_changes': pd.to_numeric(df['NoChanges']).astype(int),
+            'declines': pd.to_numeric(df['Declines']).astype(int),
+            'ceilings': pd.to_numeric(df['Ceilings']).astype(int),
+            'floors': pd.to_numeric(df['Floors']).astype(int),
+            'trading_session': df['TradingSession']
+        })
