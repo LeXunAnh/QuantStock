@@ -154,38 +154,97 @@ def render(db, sync_service, gap_service, indicator_svc, signal_svc) -> None:
                     signal_svc.run_all(s_mkt, fd)
                 s.update(label="✅ Xong", state="complete")
 
-    st.subheader("3. Index List Management")
-    col1, col2 = st.columns(2)
-    with col1:
-        selected_market = st.selectbox("Select Market",['HOSE', 'HNX', 'UPCOM'],key='index_market')
-    with col2:
+    st.subheader("3. Index Management (List & Daily Data)")
+
+    # Tạo 2 cột lớn để phân tách Quản lý Danh mục và Quản lý Dữ liệu Lịch sử
+    main_col1, main_col2 = st.columns(2)
+
+    # --- CỘT 1: INDEX LIST MANAGEMENT ---
+    with main_col1:
+        st.markdown("#### 📋 Index List Management")
+
+        selected_market = st.selectbox(
+            "Select Market for List",
+            ['HOSE', 'HNX', 'UPCOM'],
+            key='index_market'
+        )
+
         if st.button(
                 "🔄 Update Index List",
                 use_container_width=True,
                 key='btn_update_index'
         ):
-            with st.spinner(
-                    f"Đang cập nhật index list {selected_market}..."
-            ):
-                success = sync_service.fetch_index_list(
-                        selected_market
-                )
+            st.session_state.log_messages = []
+            with st.spinner(f"Đang cập nhật index list {selected_market}..."):
+                success = sync_service.fetch_index_list(selected_market)
                 if success:
-                    st.success(
-                        f"✅ Đã cập nhật index list {selected_market}")
+                    st.session_state.log_messages.append(f"✅ Đã cập nhật index list {selected_market}")
                 else:
-                    st.error(f"❌ Lỗi cập nhật index list {selected_market}")
+                    st.session_state.log_messages.append(f"❌ Lỗi cập nhật index list {selected_market}")
+
         if st.button(
-                "🚀 Sync All Markets",
+                "🚀 Sync All Markets List",
                 use_container_width=True,
                 key='btn_sync_all_index'
         ):
+            st.session_state.log_messages = []
             with st.spinner("Đang sync toàn bộ index list..."):
                 success = sync_service.sync_index_lists()
                 if success:
-                    st.success("✅ Sync toàn bộ index list thành công")
+                    st.session_state.log_messages.append("✅ Sync toàn bộ index list thành công")
                 else:
-                    st.warning("⚠️ Một số market sync thất bại")
+                    st.session_state.log_messages.append("⚠️ Một số market sync thất bại")
+
+    # --- CỘT 2: DAILY INDEX DATA MANAGEMENT (TÍNH NĂNG MỚI) ---
+    with main_col2:
+        st.markdown("#### 📈 Daily Index Data Management")
+
+        # Chọn sàn cần đồng bộ dữ liệu lịch sử
+        daily_market = st.selectbox(
+            "Select Market for Daily Data",
+            ['HOSE', 'HNX', 'UPCOM'],
+            key='daily_index_market'
+        )
+
+        # Tùy chọn Chế độ Bảo trì (Chỉ sync bù ngày thiếu)
+        maintenance_mode = st.checkbox(
+            "🔧 Chế độ bảo trì (Chỉ cập nhật ngày còn thiếu)",
+            value=True,
+            key='chk_index_maintenance',
+            help="Nếu bật, hệ thống tự động kiểm tra ngày mới nhất trong DB để sync bù. Nếu tắt, sẽ cào lại toàn bộ từ Ngày bắt đầu."
+        )
+
+        # Định hình Ngày bắt đầu (Ẩn/Hiện hoặc Vô hiệu hóa tùy theo chế độ bảo trì để UI thông minh hơn)
+        if not maintenance_mode:
+            start_date_input = st.text_input(
+                "📅 Ngày bắt đầu (dd/mm/yyyy)",
+                value="01/01/2022",
+                key='txt_index_start_date'
+            )
+        else:
+            st.info("💡 Hệ thống sẽ tự động quét từ ngày gần nhất trong DB.")
+            start_date_input = "01/01/2022"  # Fallback mặc định bên dưới nếu DB trống
+
+        # Nút kích hoạt Tiến trình Đồng bộ
+        if st.button(
+                "🚀 Sync Daily Index Data",
+                use_container_width=True,
+                key='btn_sync_daily_index',
+                type="primary"  # Tạo màu nổi bật cho hành động chính
+        ):
+            st.session_state.log_messages = []
+            with st.spinner(f"Đang chạy đồng bộ Daily Index sàn {daily_market}..."):
+                try:
+                    sync_service.sync_all_daily_index(
+                        market=daily_market,
+                        from_date=start_date_input,
+                        maintenance_mode=maintenance_mode
+                    )
+                    st.session_state.log_messages.append(
+                        f"🎉 Hoàn thành tiến trình đồng bộ Daily Index cho sàn {daily_market}!"
+                    )
+                except Exception as e:
+                    st.session_state.log_messages.append(f"❌ Quá trình đồng bộ xảy ra lỗi: {str(e)}")
 
     with st.expander("Logs hệ thống"):
         st.code(

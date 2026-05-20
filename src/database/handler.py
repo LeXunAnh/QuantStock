@@ -152,6 +152,37 @@ class DatabaseHandler:
             logger.error(f"❌ Lỗi khi tìm gap cho {symbol}: {e}")
             return []
 
+    def get_all_indices(self, market: str) -> list:
+        """
+        Lấy danh sách index_code từ bảng index_list dựa trên sàn (exchange)
+        :param market: Tên sàn cần lấy ('HOSE', 'HNX', 'UPCOM')
+        :return: Danh sách các chuỗi index_code, ví dụ: ['VNINDEX', 'VN30']
+        """
+        excluded_codes = (
+            'VNSMALLCAP', 'VNXALLSHARE', 'VN50 GROWTH', 'VNALLSHARE',
+            'VNDIVIDEND', 'VNMIDCAP', 'VNMITECH', 'VNSHINE')
+
+        query = """
+            SELECT index_code 
+            FROM index_list 
+            WHERE exchange = :market 
+              AND index_code NOT IN :excluded_codes
+        """
+        try:
+            with self.engine.connect() as conn:
+                from sqlalchemy import text
+                result = conn.execute(
+                    text(query),
+                    {
+                        "market": market,
+                        "excluded_codes": excluded_codes
+                    }
+                )
+                return [row[0] for row in result.fetchall()]
+        except Exception as e:
+            logger.error(f"Lỗi khi lấy danh sách chỉ số cho sàn {market}: {e}")
+            return []
+
     @staticmethod
     def fetch_price_with_warmup(db, symbol: str, start: date_type, end: date_type, ) -> pd.DataFrame:
         """Fetch giá với warmup 270 ngày lịch để MA200 hội tụ đúng."""
